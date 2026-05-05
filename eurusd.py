@@ -10,9 +10,15 @@ import numpy as np
 import warnings
 import time
 import requests
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 warnings.filterwarnings("ignore")
+
+# Fuso orario italiano (UTC+2 ora legale, UTC+1 ora solare)
+TZ_ITALIA = timezone(timedelta(hours=2))
+
+def ora_italiana():
+    return datetime.now(tz=TZ_ITALIA)
 
 # ── Configurazione Telegram ───────────────────────────────────────────────────
 TELEGRAM_TOKEN   = "8778873144:AAF8G_Yu-pXZ-VxLbo4E1mGj-eMbABFXU9o"
@@ -387,7 +393,7 @@ def carica_dati():
     r1h = analizza("1d", "1h")
     if "errore" not in r4h and "errore" not in r1h:
         st.session_state["dati"] = (r4h, r1h)
-        st.session_state["ultimo_aggiornamento"] = datetime.now()
+        st.session_state["ultimo_aggiornamento"] = ora_italiana()
 
         # Controlla se il segnale è cambiato → manda notifica Telegram
         p4h = r4h["punteggio"]
@@ -396,7 +402,7 @@ def carica_dati():
         segnale_precedente = st.session_state.get("ultimo_segnale")
 
         if segnale_precedente is not None and segnale != segnale_precedente:
-            ora    = datetime.now().strftime("%H:%M")
+            ora    = ora_italiana().strftime("%H:%M")
             prezzo = r1h["prezzo"]
             messaggio = (
                 f"📊 <b>EUR/USD — SEGNALE CAMBIATO</b>\n\n"
@@ -420,7 +426,7 @@ if st.session_state["dati"] is None:
 
 # Auto-refresh ogni 30 minuti (solo se timer attivo)
 if st.session_state["timer_attivo"] and st.session_state["ultimo_aggiornamento"]:
-    secondi_passati = (datetime.now() - st.session_state["ultimo_aggiornamento"]).total_seconds()
+    secondi_passati = (ora_italiana() - st.session_state["ultimo_aggiornamento"]).total_seconds()
     if secondi_passati >= INTERVALLO_MINUTI * 60:
         with st.spinner("Aggiornamento automatico..."):
             carica_dati()
@@ -562,7 +568,7 @@ elif segnale in ("ATTENDI BUY", "ATTENDI SELL"):
 timer_attivo = st.session_state["timer_attivo"]
 
 if timer_attivo and st.session_state["ultimo_aggiornamento"]:
-    prossimo_dt  = st.session_state["ultimo_aggiornamento"] + __import__('datetime').timedelta(minutes=INTERVALLO_MINUTI)
+    prossimo_dt  = st.session_state["ultimo_aggiornamento"] + timedelta(minutes=INTERVALLO_MINUTI)
     prossimo_ora = prossimo_dt.strftime("%H:%M")
     stato_label  = "AUTO-REFRESH ATTIVO"
     stato_colore = "#00d4a0"
@@ -619,7 +625,7 @@ with c3:
 
 # ── Bottone Test Telegram ─────────────────────────────────────────────────────
 if st.button("📱 TEST TELEGRAM", use_container_width=True, key="btn_telegram"):
-    ora     = datetime.now().strftime("%H:%M")
+    ora     = ora_italiana().strftime("%H:%M")
     messaggio_test = (
         f"✅ <b>Test EUR/USD Bot — funziona!</b>\n\n"
         f"⏰ Ore: {ora}\n"
