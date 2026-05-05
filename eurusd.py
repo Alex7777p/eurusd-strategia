@@ -9,9 +9,21 @@ import yfinance as yf
 import numpy as np
 import warnings
 import time
+import requests
 from datetime import datetime
 
 warnings.filterwarnings("ignore")
+
+# ── Configurazione Telegram ───────────────────────────────────────────────────
+TELEGRAM_TOKEN   = "8778873144:AAF8G_Yu-pXZ-VxLbo4E1mGj-eMbABFXU9o"
+TELEGRAM_CHAT_ID = "1614697498"
+
+def invia_telegram(messaggio: str):
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": messaggio, "parse_mode": "HTML"}, timeout=10)
+    except Exception:
+        pass
 
 # ══════════════════════════════════════════════════════════════════════════════
 st.set_page_config(
@@ -376,6 +388,27 @@ def carica_dati():
     if "errore" not in r4h and "errore" not in r1h:
         st.session_state["dati"] = (r4h, r1h)
         st.session_state["ultimo_aggiornamento"] = datetime.now()
+
+        # Controlla se il segnale è cambiato → manda notifica Telegram
+        p4h = r4h["punteggio"]
+        p1h = r1h["punteggio"]
+        segnale, _, _, _ = calcola_segnale(p4h, p1h)
+        segnale_precedente = st.session_state.get("ultimo_segnale")
+
+        if segnale_precedente is not None and segnale != segnale_precedente:
+            ora    = datetime.now().strftime("%H:%M")
+            prezzo = r1h["prezzo"]
+            messaggio = (
+                f"📊 <b>EUR/USD — SEGNALE CAMBIATO</b>\n\n"
+                f"⏰ Ore: {ora}\n"
+                f"💱 Prezzo: {prezzo:.5f}\n\n"
+                f"📌 Precedente: <b>{segnale_precedente}</b>\n"
+                f"🔔 Nuovo: <b>{segnale}</b>\n\n"
+                f"4H: {p4h}% | 1H: {p1h}%"
+            )
+            invia_telegram(messaggio)
+
+        st.session_state["ultimo_segnale"] = segnale
     return r4h, r1h
 
 
@@ -583,6 +616,20 @@ with c3:
         st.session_state["dati"] = None
         st.session_state["ultimo_aggiornamento"] = None
         st.rerun()
+
+# ── Bottone Test Telegram ─────────────────────────────────────────────────────
+if st.button("📱 TEST TELEGRAM", use_container_width=True, key="btn_telegram"):
+    ora     = datetime.now().strftime("%H:%M")
+    messaggio_test = (
+        f"✅ <b>Test EUR/USD Bot — funziona!</b>\n\n"
+        f"⏰ Ore: {ora}\n"
+        f"💱 Prezzo: {prezzo:.5f}\n"
+        f"🔔 Segnale attuale: <b>{segnale}</b>\n\n"
+        f"4H: {p4h}% | 1H: {p1h}%\n\n"
+        f"🤖 Il bot è attivo e funzionante!"
+    )
+    invia_telegram(messaggio_test)
+    st.success("✅ Messaggio inviato su Telegram!")
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown(f"""
