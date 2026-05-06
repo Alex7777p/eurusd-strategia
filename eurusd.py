@@ -9,27 +9,9 @@ import yfinance as yf
 import numpy as np
 import warnings
 import time
-import requests
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 
 warnings.filterwarnings("ignore")
-
-# Fuso orario italiano (UTC+2 ora legale, UTC+1 ora solare)
-TZ_ITALIA = timezone(timedelta(hours=2))
-
-def ora_italiana():
-    return datetime.now(tz=TZ_ITALIA)
-
-# ── Configurazione Telegram ───────────────────────────────────────────────────
-TELEGRAM_TOKEN   = "8778873144:AAF8G_Yu-pXZ-VxLbo4E1mGj-eMbABFXU9o"
-TELEGRAM_CHAT_ID = "1614697498"
-
-def invia_telegram(messaggio: str):
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": messaggio, "parse_mode": "HTML"}, timeout=10)
-    except Exception:
-        pass
 
 # ══════════════════════════════════════════════════════════════════════════════
 st.set_page_config(
@@ -261,15 +243,29 @@ html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  LOGICA ANALISI — identica al programma originale trend_analyzer.py
+#  LOGICA ANALISI
+#  Allineata al programma locale (trend_analyzer.py):
+#  - "4H" usa period="5d" interval="1h"  (come il locale)
+#  - "1H" usa period="1d" interval="5m"  (come il locale)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def analizza(periodo: str, intervallo: str) -> dict:
-    """Logica identica a analizza_trend() del programma originale."""
     try:
-        df = yf.Ticker("EURUSD=X").history(period=periodo, interval=intervallo)
+        # Prima scarica senza intervallo (come fa il locale)
+        ticker = yf.Ticker("EURUSD=X")
+        df = ticker.history(period=periodo)
         if df.empty:
             return {"errore": "Nessun dato"}
+
+        # Poi ri-scarica con l'intervallo corretto (identico alla logica locale)
+        if periodo == "5d":
+            df = ticker.history(period=periodo, interval="1h")   # locale usa 1h per "4H"
+        elif periodo == "1d":
+            df = ticker.history(period=periodo, interval="5m")   # locale usa 5m per "1H"
+
+        if df.empty:
+            return {"errore": "Nessun dato dopo intervallo"}
+
     except Exception as e:
         return {"errore": str(e)}
 
@@ -320,7 +316,7 @@ def analizza(periodo: str, intervallo: str) -> dict:
 
     if not np.isnan(rsi):
         if rsi < 30 or rsi > 70:
-            pass  # ipervenduto/ipercomprato: neutro come nell'originale
+            pass  # ipervenduto/ipercomprato: neutro
         elif rsi > 50: segnali_rialzo += 1
         else: segnali_ribasso += 1
 
@@ -335,29 +331,28 @@ def analizza(periodo: str, intervallo: str) -> dict:
     totale    = segnali_rialzo + segnali_ribasso
     punteggio = segnali_rialzo / totale if totale > 0 else 0.5
 
-    # Verdetto identico all'originale
     if punteggio >= 0.7:   verdetto = "TREND IN CRESCITA"
     elif punteggio >= 0.5: verdetto = "TREND POSITIVO"
     elif punteggio >= 0.3: verdetto = "TREND NEGATIVO"
     else:                  verdetto = "TREND IN CALO"
 
     return {
-        "prezzo":    prezzo,
-        "punteggio": round(punteggio * 100, 1),
-        "verdetto":  verdetto,
-        "rsi":       rsi,
-        "ma20":      ma20,
+        "prezzo":          prezzo,
+        "punteggio":       round(punteggio * 100, 1),
+        "verdetto":        verdetto,
+        "rsi":             rsi,
+        "ma20":            ma20,
         "segnali_rialzo":  segnali_rialzo,
         "segnali_ribasso": segnali_ribasso,
     }
 
 
 def calcola_segnale(p4h: float, p1h: float) -> tuple:
-    if   p4h >= 60 and p1h >= 55: return "BUY",         "🟢", "card-buy",   "#00d4a0"
-    elif p4h <= 40 and p1h <= 45: return "SELL",        "🔴", "card-sell",  "#ff4757"
-    elif p4h >= 60:               return "ATTENDI BUY", "🟡", "card-wait",  "#ffc107"
-    elif p4h <= 40:               return "ATTENDI SELL","🟡", "card-wait",  "#ffc107"
-    else:                         return "NEUTRO",       "⏸️", "card-neutro","#546e7a"
+    if   p4h >= 60 and p1h >= 55: return "BUY",          "🟢", "card-buy",    "#00d4a0"
+    elif p4h <= 40 and p1h <= 45: return "SELL",         "🔴", "card-sell",   "#ff4757"
+    elif p4h >= 60:               return "ATTENDI BUY",  "🟡", "card-wait",   "#ffc107"
+    elif p4h <= 40:               return "ATTENDI SELL", "🟡", "card-wait",   "#ffc107"
+    else:                         return "NEUTRO",        "⏸️", "card-neutro", "#546e7a"
 
 
 def descrizione_segnale(segnale: str, p4h: float, p1h: float) -> str:
@@ -376,6 +371,7 @@ def descrizione_segnale(segnale: str, p4h: float, p1h: float) -> str:
 # ══════════════════════════════════════════════════════════════════════════════
 #  SESSION STATE
 # ══════════════════════════════════════════════════════════════════════════════
+
 if "dati" not in st.session_state:
     st.session_state["dati"] = None
 if "ultimo_aggiornamento" not in st.session_state:
@@ -389,32 +385,11 @@ INTERVALLO_MINUTI = 30
 
 
 def carica_dati():
-    r4h = analizza("5d", "4h")
-    r1h = analizza("1d", "1h")
+    r4h = analizza("5d", "1h")   # locale: period=5d → interval=1h
+    r1h = analizza("1d", "5m")   # locale: period=1d → interval=5m
     if "errore" not in r4h and "errore" not in r1h:
         st.session_state["dati"] = (r4h, r1h)
-        st.session_state["ultimo_aggiornamento"] = ora_italiana()
-
-        # Controlla se il segnale è cambiato → manda notifica Telegram
-        p4h = r4h["punteggio"]
-        p1h = r1h["punteggio"]
-        segnale, _, _, _ = calcola_segnale(p4h, p1h)
-        segnale_precedente = st.session_state.get("ultimo_segnale")
-
-        if segnale_precedente is not None and segnale != segnale_precedente:
-            ora    = ora_italiana().strftime("%H:%M")
-            prezzo = r1h["prezzo"]
-            messaggio = (
-                f"📊 <b>EUR/USD — SEGNALE CAMBIATO</b>\n\n"
-                f"⏰ Ore: {ora}\n"
-                f"💱 Prezzo: {prezzo:.5f}\n\n"
-                f"📌 Precedente: <b>{segnale_precedente}</b>\n"
-                f"🔔 Nuovo: <b>{segnale}</b>\n\n"
-                f"4H: {p4h}% | 1H: {p1h}%"
-            )
-            invia_telegram(messaggio)
-
-        st.session_state["ultimo_segnale"] = segnale
+        st.session_state["ultimo_aggiornamento"] = datetime.now()
     return r4h, r1h
 
 
@@ -426,7 +401,7 @@ if st.session_state["dati"] is None:
 
 # Auto-refresh ogni 30 minuti (solo se timer attivo)
 if st.session_state["timer_attivo"] and st.session_state["ultimo_aggiornamento"]:
-    secondi_passati = (ora_italiana() - st.session_state["ultimo_aggiornamento"]).total_seconds()
+    secondi_passati = (datetime.now() - st.session_state["ultimo_aggiornamento"]).total_seconds()
     if secondi_passati >= INTERVALLO_MINUTI * 60:
         with st.spinner("Aggiornamento automatico..."):
             carica_dati()
@@ -453,7 +428,7 @@ segnale, emoji, card_class, colore = calcola_segnale(p4h, p1h)
 desc = descrizione_segnale(segnale, p4h, p1h)
 
 # Calcola livelli operativi
-ma20   = r1h["ma20"]
+ma20 = r1h["ma20"]
 if not np.isnan(ma20) and ma20 > 0:
     sl_buy  = round(min(prezzo - 0.0030, ma20 * 0.998), 5)
     sl_sell = round(max(prezzo + 0.0030, ma20 * 1.002), 5)
@@ -622,20 +597,6 @@ with c3:
         st.session_state["dati"] = None
         st.session_state["ultimo_aggiornamento"] = None
         st.rerun()
-
-# ── Bottone Test Telegram ─────────────────────────────────────────────────────
-if st.button("📱 TEST TELEGRAM", use_container_width=True, key="btn_telegram"):
-    ora     = ora_italiana().strftime("%H:%M")
-    messaggio_test = (
-        f"✅ <b>Test EUR/USD Bot — funziona!</b>\n\n"
-        f"⏰ Ore: {ora}\n"
-        f"💱 Prezzo: {prezzo:.5f}\n"
-        f"🔔 Segnale attuale: <b>{segnale}</b>\n\n"
-        f"4H: {p4h}% | 1H: {p1h}%\n\n"
-        f"🤖 Il bot è attivo e funzionante!"
-    )
-    invia_telegram(messaggio_test)
-    st.success("✅ Messaggio inviato su Telegram!")
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown(f"""
