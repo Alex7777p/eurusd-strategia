@@ -1,10 +1,10 @@
 """
-EUR/USD Strategia 4H + 1H
-App minimalista per telefono — aggiornamento automatico ogni 30 minuti
+Forex Strategia 4H + 1H — EUR/USD e EUR/JPY
+App per telefono — aggiornamento automatico ogni 30 minuti
+Logica identica al programma desktop trend_analyzer_gui.py
 """
 
 import streamlit as st
-import streamlit.components.v1 as components
 import yfinance as yf
 import numpy as np
 import warnings
@@ -14,7 +14,7 @@ from datetime import datetime, timezone, timedelta
 
 warnings.filterwarnings("ignore")
 
-# Fuso orario italiano (UTC+2 ora legale, UTC+1 ora solare)
+# Fuso orario italiano (UTC+2 ora legale)
 TZ_ITALIA = timezone(timedelta(hours=2))
 
 def ora_italiana():
@@ -31,9 +31,32 @@ def invia_telegram(messaggio: str):
     except Exception:
         pass
 
+# ── Sessione di mercato ───────────────────────────────────────────────────────
+def get_sessione(coppia: str) -> dict:
+    h = ora_italiana().hour + ora_italiana().minute / 60.0
+    if coppia == "EURUSD":
+        if 9.0 <= h < 14.0:
+            return {"nome": "LONDRA", "stato": "🟢 APERTO", "colore": "#00d4a0"}
+        elif 14.0 <= h < 17.5:
+            return {"nome": "LONDRA + NEW YORK 🔥", "stato": "🟢 APERTO — momento migliore!", "colore": "#00d4a0"}
+        elif 17.5 <= h < 22.0:
+            return {"nome": "NEW YORK", "stato": "🟢 APERTO", "colore": "#ffc107"}
+        else:
+            return {"nome": "FUORI SESSIONE", "stato": "🔴 CHIUSO — Aspetta Londra (09:00)", "colore": "#ff4757"}
+    elif coppia == "EURJPY":
+        if 1.0 <= h < 9.0:
+            return {"nome": "TOKYO", "stato": "🟢 APERTO", "colore": "#00d4a0"}
+        elif 9.0 <= h < 9.5:
+            return {"nome": "TOKYO + LONDRA 🔥", "stato": "🟢 APERTO — momento migliore!", "colore": "#00d4a0"}
+        elif 9.5 <= h < 17.5:
+            return {"nome": "LONDRA", "stato": "🟢 APERTO", "colore": "#00d4a0"}
+        else:
+            return {"nome": "FUORI SESSIONE", "stato": "🔴 CHIUSO — Aspetta Tokyo (01:00) o Londra (09:00)", "colore": "#ff4757"}
+    return {"nome": "—", "stato": "—", "colore": "#546e7a"}
+
 # ══════════════════════════════════════════════════════════════════════════════
 st.set_page_config(
-    page_title="EUR/USD",
+    page_title="Forex Strategia",
     page_icon="💱",
     layout="centered",
     initial_sidebar_state="collapsed",
@@ -59,7 +82,6 @@ st.markdown("""
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body, .stApp { background: var(--bg) !important; color: var(--text); }
 
-/* Nascondi elementi Streamlit inutili su mobile */
 #MainMenu, footer, header, [data-testid="stToolbar"],
 [data-testid="stDecoration"], [data-testid="stStatusWidget"] { display: none !important; }
 
@@ -69,10 +91,9 @@ html, body, .stApp { background: var(--bg) !important; color: var(--text); }
     margin: 0 auto !important;
 }
 
-/* Font */
 html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
 
-/* Titolo */
+/* Header */
 .app-header {
     text-align: center;
     padding: 28px 20px 16px;
@@ -100,9 +121,22 @@ html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
     margin-top: 4px;
 }
 
-/* Card segnale principale */
+/* Sessione */
+.sessione-box {
+    margin: 12px 16px 0;
+    padding: 10px 16px;
+    border-radius: 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    font-size: 0.85rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* Card segnale */
 .signal-card {
-    margin: 20px 16px;
+    margin: 16px 16px;
     border-radius: 16px;
     padding: 28px 20px;
     text-align: center;
@@ -142,6 +176,11 @@ html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
     margin-top: 8px;
     line-height: 1.4;
 }
+
+@keyframes pulse-buy  { 0%,100%{box-shadow:0 0 0 0 rgba(0,212,160,.3)} 50%{box-shadow:0 0 0 12px rgba(0,212,160,0)} }
+@keyframes pulse-sell { 0%,100%{box-shadow:0 0 0 0 rgba(255,71,87,.3)}  50%{box-shadow:0 0 0 12px rgba(255,71,87,0)} }
+.card-buy  { animation: pulse-buy  2.5s ease-in-out infinite; }
+.card-sell { animation: pulse-sell 2.5s ease-in-out infinite; }
 
 /* Timeframe cards */
 .tf-grid {
@@ -211,6 +250,25 @@ html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
 .ops-key { color: var(--muted); }
 .ops-val { font-family: 'DM Mono', monospace; font-weight: 500; }
 
+/* Scelta coppia */
+.scelta-header {
+    text-align: center;
+    padding: 40px 20px 20px;
+}
+.scelta-title {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 2.4rem;
+    letter-spacing: 4px;
+    color: var(--text);
+}
+.scelta-sub {
+    font-size: 0.8rem;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-top: 8px;
+}
+
 /* Footer */
 .app-footer {
     text-align: center;
@@ -221,7 +279,7 @@ html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
     margin-top: 8px;
 }
 
-/* Bottone aggiorna */
+/* Bottoni */
 .stButton > button {
     width: 100%;
     background: var(--surf2) !important;
@@ -239,43 +297,22 @@ html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
     color: var(--buy) !important;
 }
 
-/* Countdown */
-.countdown {
-    text-align: center;
-    font-family: 'DM Mono', monospace;
-    font-size: 0.8rem;
-    color: var(--muted);
-    padding: 8px;
-}
-
-/* Spinner override */
 .stSpinner > div { border-top-color: var(--buy) !important; }
-
-/* Animazione pulse per segnale attivo */
-@keyframes pulse-buy  { 0%,100%{box-shadow:0 0 0 0 rgba(0,212,160,.3)} 50%{box-shadow:0 0 0 12px rgba(0,212,160,0)} }
-@keyframes pulse-sell { 0%,100%{box-shadow:0 0 0 0 rgba(255,71,87,.3)}  50%{box-shadow:0 0 0 12px rgba(255,71,87,0)} }
-.card-buy  { animation: pulse-buy  2.5s ease-in-out infinite; }
-.card-sell { animation: pulse-sell 2.5s ease-in-out infinite; }
 </style>
 """, unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  LOGICA ANALISI — identica al programma originale trend_analyzer.py
+#  LOGICA ANALISI — identica al programma desktop trend_analyzer_gui.py
 # ══════════════════════════════════════════════════════════════════════════════
 
-def analizza(periodo: str, intervallo: str) -> dict:
-    """Logica identica a analizza_trend() del programma originale."""
+def analizza(simbolo: str, periodo: str, intervallo: str) -> dict:
+    """Logica identica a analizza_trend() del programma desktop."""
     try:
-        ticker = yf.Ticker("EURUSD=X")
-        df = ticker.history(period=periodo)
+        ticker = yf.Ticker(simbolo)
+        df = ticker.history(period=periodo, interval=intervallo)
         if df.empty:
-            return {"errore": "Nessun dato"}
-        # Usa gli stessi intervalli del programma locale (trend_analyzer.py)
-        if periodo == "5d":
-            df = ticker.history(period=periodo, interval="1h")
-        elif periodo == "1d":
-            df = ticker.history(period=periodo, interval="5m")
+            df = ticker.history(period=periodo)
         if df.empty:
             return {"errore": "Nessun dato"}
     except Exception as e:
@@ -290,12 +327,14 @@ def analizza(periodo: str, intervallo: str) -> dict:
     df["MA50"]  = df["Close"].rolling(window=w50).mean()  if w50  else np.nan
     df["MA200"] = df["Close"].rolling(window=w200).mean() if w200 else np.nan
 
+    # RSI — identico al desktop
     delta   = df["Close"].diff()
     rsi_win = min(14, n - 1)
     media_g = delta.clip(lower=0).rolling(window=rsi_win).mean()
     media_p = (-delta.clip(upper=0)).rolling(window=rsi_win).mean()
     df["RSI"] = 100 - (100 / (1 + media_g / (media_p + 1e-10)))
 
+    # MACD — identico al desktop
     s12 = min(12, max(2, n // 5))
     s26 = min(26, max(3, n // 3))
     s9  = min(9,  max(2, n // 7))
@@ -326,10 +365,9 @@ def analizza(periodo: str, intervallo: str) -> dict:
         if ma20 > ma50: segnali_rialzo += 1
         else: segnali_ribasso += 1
 
+    # RSI — identico al desktop (ipercomprato/ipervenduto conta)
     if not np.isnan(rsi):
-        if rsi < 30 or rsi > 70:
-            pass  # ipervenduto/ipercomprato: neutro come nell'originale
-        elif rsi > 50: segnali_rialzo += 1
+        if rsi > 50: segnali_rialzo += 1
         else: segnali_ribasso += 1
 
     if not np.isnan(macd) and not np.isnan(signal):
@@ -341,17 +379,16 @@ def analizza(periodo: str, intervallo: str) -> dict:
         else: segnali_ribasso += 1
 
     totale    = segnali_rialzo + segnali_ribasso
-    punteggio = segnali_rialzo / totale if totale > 0 else 0.5
+    punteggio = round((segnali_rialzo / totale) * 100, 1) if totale > 0 else 50.0
 
-    # Verdetto identico all'originale
-    if punteggio >= 0.7:   verdetto = "TREND IN CRESCITA"
-    elif punteggio >= 0.5: verdetto = "TREND POSITIVO"
-    elif punteggio >= 0.3: verdetto = "TREND NEGATIVO"
-    else:                  verdetto = "TREND IN CALO"
+    if punteggio >= 70:   verdetto = "TREND IN CRESCITA"
+    elif punteggio >= 50: verdetto = "TREND POSITIVO"
+    elif punteggio >= 30: verdetto = "TREND NEGATIVO"
+    else:                 verdetto = "TREND IN CALO"
 
     return {
         "prezzo":    prezzo,
-        "punteggio": round(punteggio * 100, 1),
+        "punteggio": punteggio,
         "verdetto":  verdetto,
         "rsi":       rsi,
         "ma20":      ma20,
@@ -361,11 +398,11 @@ def analizza(periodo: str, intervallo: str) -> dict:
 
 
 def calcola_segnale(p4h: float, p1h: float) -> tuple:
-    if   p4h >= 60 and p1h >= 55: return "BUY",         "🟢", "card-buy",   "#00d4a0"
-    elif p4h <= 40 and p1h <= 45: return "SELL",        "🔴", "card-sell",  "#ff4757"
-    elif p4h >= 60:               return "ATTENDI BUY", "🟡", "card-wait",  "#ffc107"
-    elif p4h <= 40:               return "ATTENDI SELL","🟡", "card-wait",  "#ffc107"
-    else:                         return "NEUTRO",       "⏸️", "card-neutro","#546e7a"
+    if   p4h >= 60 and p1h >= 55: return "BUY",          "🟢", "card-buy",    "#00d4a0"
+    elif p4h <= 40 and p1h <= 45: return "SELL",         "🔴", "card-sell",   "#ff4757"
+    elif p4h >= 60:               return "ATTENDI BUY",  "🟡", "card-wait",   "#ffc107"
+    elif p4h <= 40:               return "ATTENDI SELL", "🟡", "card-wait",   "#ffc107"
+    else:                         return "NEUTRO",        "⏸️", "card-neutro", "#546e7a"
 
 
 def descrizione_segnale(segnale: str, p4h: float, p1h: float) -> str:
@@ -374,76 +411,129 @@ def descrizione_segnale(segnale: str, p4h: float, p1h: float) -> str:
     elif segnale == "SELL":
         return "4H e 1H allineati al ribasso → Entra SHORT"
     elif segnale == "ATTENDI BUY":
-        return f"Trend 4H rialzista ({p4h}%) ma 1H non ancora pronto ({p1h}%) — aspetta conferma"
+        return f"Trend 4H rialzista ({p4h}%) — aspetta conferma 1H ({p1h}%)"
     elif segnale == "ATTENDI SELL":
-        return f"Trend 4H ribassista ({p4h}%) ma 1H non ancora pronto ({p1h}%) — aspetta conferma"
+        return f"Trend 4H ribassista ({p4h}%) — aspetta conferma 1H ({p1h}%)"
     else:
         return "Segnali non allineati — rimani fuori dal mercato"
+
+
+def colore_tf(p):
+    if p >= 55: return "#00d4a0"
+    elif p <= 40: return "#ff4757"
+    else: return "#ffc107"
+
+
+def label_tf(p):
+    if p >= 70:  return "IN CRESCITA"
+    elif p >= 55: return "POSITIVO"
+    elif p >= 45: return "NEUTRO"
+    elif p >= 30: return "NEGATIVO"
+    else:         return "IN CALO"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  SESSION STATE
 # ══════════════════════════════════════════════════════════════════════════════
+if "coppia" not in st.session_state:
+    st.session_state["coppia"] = None
 if "dati" not in st.session_state:
     st.session_state["dati"] = None
 if "ultimo_aggiornamento" not in st.session_state:
     st.session_state["ultimo_aggiornamento"] = None
-if "ultimo_segnale" not in st.session_state:
-    st.session_state["ultimo_segnale"] = None
 if "timer_attivo" not in st.session_state:
     st.session_state["timer_attivo"] = True
 
 INTERVALLO_MINUTI = 30
 
+COPPIE = {
+    "EURUSD": {"simbolo": "EURUSD=X", "nome": "EUR / USD", "pip": 0.0001, "decimali": 5},
+    "EURJPY": {"simbolo": "EURJPY=X", "nome": "EUR / JPY", "pip": 0.01,   "decimali": 3},
+}
 
-def carica_dati():
-    r4h = analizza("5d", "4h")
-    r1h = analizza("1d", "1h")
+
+def carica_dati(coppia: str):
+    cfg = COPPIE[coppia]
+    r4h = analizza(cfg["simbolo"], "5d", "1h")
+    r1h = analizza(cfg["simbolo"], "1d", "1h")
     if "errore" not in r4h and "errore" not in r1h:
         st.session_state["dati"] = (r4h, r1h)
         st.session_state["ultimo_aggiornamento"] = ora_italiana()
 
-        # Controlla se il segnale è cambiato → manda notifica Telegram
-        p4h = r4h["punteggio"]
-        p1h = r1h["punteggio"]
-        segnale, _, _, _ = calcola_segnale(p4h, p1h)
-        segnale_precedente = st.session_state.get("ultimo_segnale")
 
-        if segnale_precedente is not None and segnale != segnale_precedente:
-            ora    = ora_italiana().strftime("%H:%M")
-            prezzo = r1h["prezzo"]
-            messaggio = (
-                f"📊 <b>EUR/USD — SEGNALE CAMBIATO</b>\n\n"
-                f"⏰ Ore: {ora}\n"
-                f"💱 Prezzo: {prezzo:.5f}\n\n"
-                f"📌 Precedente: <b>{segnale_precedente}</b>\n"
-                f"🔔 Nuovo: <b>{segnale}</b>\n\n"
-                f"4H: {p4h}% | 1H: {p1h}%"
-            )
-            invia_telegram(messaggio)
+# ══════════════════════════════════════════════════════════════════════════════
+#  SCHERMATA SCELTA COPPIA
+# ══════════════════════════════════════════════════════════════════════════════
+if st.session_state["coppia"] is None:
+    st.markdown("""
+    <div class="scelta-header">
+        <div class="scelta-title">💱 FOREX STRATEGIA</div>
+        <div class="scelta-sub">Seleziona la coppia da monitorare</div>
+    </div>
+    """, unsafe_allow_html=True)
 
-        st.session_state["ultimo_segnale"] = segnale
-    return r4h, r1h
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("💱  EUR / USD", use_container_width=True, key="btn_eurusd"):
+            st.session_state["coppia"] = "EURUSD"
+            st.session_state["dati"] = None
+            st.session_state["ultimo_aggiornamento"] = None
+            st.rerun()
+    with col2:
+        if st.button("🎌  EUR / JPY", use_container_width=True, key="btn_eurjpy"):
+            st.session_state["coppia"] = "EURJPY"
+            st.session_state["dati"] = None
+            st.session_state["ultimo_aggiornamento"] = None
+            st.rerun()
+
+    # Mostra sessioni attive
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+    s_usd = get_sessione("EURUSD")
+    s_jpy = get_sessione("EURJPY")
+    st.markdown(f"""
+    <div style="margin: 0 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px;">
+        <div style="font-size:0.7rem; color:var(--muted); letter-spacing:2px; text-transform:uppercase; margin-bottom:12px;">Sessioni attive ora</div>
+        <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--border); font-size:0.85rem;">
+            <span style="color:var(--muted);">EUR/USD</span>
+            <span style="color:{s_usd['colore']}; font-family:'DM Mono',monospace;">{s_usd['stato']}</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; padding:8px 0; font-size:0.85rem;">
+            <span style="color:var(--muted);">EUR/JPY</span>
+            <span style="color:{s_jpy['colore']}; font-family:'DM Mono',monospace;">{s_jpy['stato']}</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown(f"""
+    <div class="app-footer">
+        {ora_italiana().strftime("%H:%M")} ora italiana &nbsp;·&nbsp; Dati: Yahoo Finance
+    </div>
+    """, unsafe_allow_html=True)
+    st.stop()
 
 
-# Carica dati al primo avvio o dopo aggiornamento manuale
+# ══════════════════════════════════════════════════════════════════════════════
+#  SCHERMATA ANALISI
+# ══════════════════════════════════════════════════════════════════════════════
+coppia = st.session_state["coppia"]
+cfg    = COPPIE[coppia]
+
+# Carica dati al primo avvio
 if st.session_state["dati"] is None:
-    with st.spinner("⏳ Caricamento dati EUR/USD..."):
-        carica_dati()
+    with st.spinner(f"⏳ Caricamento dati {cfg['nome']}..."):
+        carica_dati(coppia)
     st.rerun()
 
-# Auto-refresh ogni 30 minuti (solo se timer attivo)
+# Auto-refresh ogni 30 minuti
 if st.session_state["timer_attivo"] and st.session_state["ultimo_aggiornamento"]:
     secondi_passati = (ora_italiana() - st.session_state["ultimo_aggiornamento"]).total_seconds()
     if secondi_passati >= INTERVALLO_MINUTI * 60:
         with st.spinner("Aggiornamento automatico..."):
-            carica_dati()
+            carica_dati(coppia)
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  RENDERING
-# ══════════════════════════════════════════════════════════════════════════════
-
+# ── Dati ─────────────────────────────────────────────────────────────────────
 r4h, r1h = st.session_state["dati"]
 
 if "errore" in r4h or "errore" in r1h:
@@ -456,32 +546,43 @@ if "errore" in r4h or "errore" in r1h:
 p4h    = r4h["punteggio"]
 p1h    = r1h["punteggio"]
 prezzo = r1h["prezzo"]
+dec    = cfg["decimali"]
+pip    = cfg["pip"]
 
 segnale, emoji, card_class, colore = calcola_segnale(p4h, p1h)
-desc = descrizione_segnale(segnale, p4h, p1h)
+desc    = descrizione_segnale(segnale, p4h, p1h)
+sessione = get_sessione(coppia)
 
 # Calcola livelli operativi
-ma20   = r1h["ma20"]
+ma20 = r1h["ma20"]
 if not np.isnan(ma20) and ma20 > 0:
-    sl_buy  = round(min(prezzo - 0.0030, ma20 * 0.998), 5)
-    sl_sell = round(max(prezzo + 0.0030, ma20 * 1.002), 5)
+    sl_buy  = round(min(prezzo - pip * 30, ma20 * 0.998), dec)
+    sl_sell = round(max(prezzo + pip * 30, ma20 * 1.002), dec)
 else:
-    sl_buy  = round(prezzo - 0.0030, 5)
-    sl_sell = round(prezzo + 0.0030, 5)
+    sl_buy  = round(prezzo - pip * 30, dec)
+    sl_sell = round(prezzo + pip * 30, dec)
 
-t1_buy  = round(prezzo + 0.0020, 5)
-t2_buy  = round(prezzo + 0.0040, 5)
-t1_sell = round(prezzo - 0.0020, 5)
-t2_sell = round(prezzo - 0.0040, 5)
+t1_buy  = round(prezzo + pip * 20, dec)
+t2_buy  = round(prezzo + pip * 40, dec)
+t1_sell = round(prezzo - pip * 20, dec)
+t2_sell = round(prezzo - pip * 40, dec)
 
 ora_agg = st.session_state["ultimo_aggiornamento"].strftime("%H:%M") if st.session_state["ultimo_aggiornamento"] else "—"
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown(f"""
 <div class="app-header">
-    <div class="pair">EUR / USD</div>
-    <div class="price">{prezzo:.5f}</div>
+    <div class="pair">{cfg['nome']}</div>
+    <div class="price">{prezzo:.{dec}f}</div>
     <div class="subtitle">Strategia 4H + 1H</div>
+</div>
+""", unsafe_allow_html=True)
+
+# ── Sessione ──────────────────────────────────────────────────────────────────
+st.markdown(f"""
+<div class="sessione-box">
+    <span style="color:var(--muted); font-size:0.75rem; letter-spacing:1px; text-transform:uppercase;">Sessione</span>
+    <span style="color:{sessione['colore']}; font-family:'DM Mono',monospace; font-size:0.85rem; font-weight:500;">{sessione['stato']} — {sessione['nome']}</span>
 </div>
 """, unsafe_allow_html=True)
 
@@ -495,23 +596,10 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ── Cards 4H e 1H ─────────────────────────────────────────────────────────────
-def colore_tf(p):
-    if p >= 55: return "#00d4a0"
-    elif p <= 40: return "#ff4757"
-    else: return "#ffc107"
-
-def label_tf(p):
-    if p >= 60: return "RIALZISTA"
-    elif p >= 55: return "POSITIVO"
-    elif p >= 45: return "NEUTRO"
-    elif p >= 40: return "NEGATIVO"
-    else: return "RIBASSISTA"
-
 rsi4h_s = f"{r4h['rsi']:.1f}" if not np.isnan(r4h['rsi']) else "—"
 rsi1h_s = f"{r1h['rsi']:.1f}" if not np.isnan(r1h['rsi']) else "—"
-
-col_4h = colore_tf(p4h)
-col_1h = colore_tf(p1h)
+col_4h  = colore_tf(p4h)
+col_1h  = colore_tf(p1h)
 
 st.markdown(f"""
 <div class="tf-grid">
@@ -534,15 +622,15 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# ── Dettagli operativi ─────────────────────────────────────────────────────────
+# ── Dettagli operativi ────────────────────────────────────────────────────────
 if segnale == "BUY":
     st.markdown(f"""
     <div class="ops-box">
         <div class="ops-title">📋 Dettagli operazione BUY</div>
-        <div class="ops-row"><span class="ops-key">Ingresso</span><span class="ops-val" style="color:#00d4a0;">{prezzo:.5f}</span></div>
-        <div class="ops-row"><span class="ops-key">Stop Loss</span><span class="ops-val" style="color:#ff4757;">{sl_buy:.5f} &nbsp;(-{round((prezzo-sl_buy)*10000):.0f} pip)</span></div>
-        <div class="ops-row"><span class="ops-key">Target 1</span><span class="ops-val" style="color:#00d4a0;">{t1_buy:.5f} &nbsp;(+{round((t1_buy-prezzo)*10000):.0f} pip)</span></div>
-        <div class="ops-row"><span class="ops-key">Target 2</span><span class="ops-val" style="color:#00d4a0;">{t2_buy:.5f} &nbsp;(+{round((t2_buy-prezzo)*10000):.0f} pip)</span></div>
+        <div class="ops-row"><span class="ops-key">Ingresso</span><span class="ops-val" style="color:#00d4a0;">{prezzo:.{dec}f}</span></div>
+        <div class="ops-row"><span class="ops-key">Stop Loss</span><span class="ops-val" style="color:#ff4757;">{sl_buy:.{dec}f} &nbsp;(-{round((prezzo-sl_buy)/pip):.0f} pip)</span></div>
+        <div class="ops-row"><span class="ops-key">Target 1</span><span class="ops-val" style="color:#00d4a0;">{t1_buy:.{dec}f} &nbsp;(+{round((t1_buy-prezzo)/pip):.0f} pip)</span></div>
+        <div class="ops-row"><span class="ops-key">Target 2</span><span class="ops-val" style="color:#00d4a0;">{t2_buy:.{dec}f} &nbsp;(+{round((t2_buy-prezzo)/pip):.0f} pip)</span></div>
         <div class="ops-row"><span class="ops-key">Rischio max</span><span class="ops-val">2% del capitale</span></div>
     </div>
     """, unsafe_allow_html=True)
@@ -551,10 +639,10 @@ elif segnale == "SELL":
     st.markdown(f"""
     <div class="ops-box">
         <div class="ops-title">📋 Dettagli operazione SELL</div>
-        <div class="ops-row"><span class="ops-key">Ingresso</span><span class="ops-val" style="color:#ff4757;">{prezzo:.5f}</span></div>
-        <div class="ops-row"><span class="ops-key">Stop Loss</span><span class="ops-val" style="color:#ff4757;">{sl_sell:.5f} &nbsp;(+{round((sl_sell-prezzo)*10000):.0f} pip)</span></div>
-        <div class="ops-row"><span class="ops-key">Target 1</span><span class="ops-val" style="color:#00d4a0;">{t1_sell:.5f} &nbsp;(-{round((prezzo-t1_sell)*10000):.0f} pip)</span></div>
-        <div class="ops-row"><span class="ops-key">Target 2</span><span class="ops-val" style="color:#00d4a0;">{t2_sell:.5f} &nbsp;(-{round((prezzo-t2_sell)*10000):.0f} pip)</span></div>
+        <div class="ops-row"><span class="ops-key">Ingresso</span><span class="ops-val" style="color:#ff4757;">{prezzo:.{dec}f}</span></div>
+        <div class="ops-row"><span class="ops-key">Stop Loss</span><span class="ops-val" style="color:#ff4757;">{sl_sell:.{dec}f} &nbsp;(+{round((sl_sell-prezzo)/pip):.0f} pip)</span></div>
+        <div class="ops-row"><span class="ops-key">Target 1</span><span class="ops-val" style="color:#00d4a0;">{t1_sell:.{dec}f} &nbsp;(-{round((prezzo-t1_sell)/pip):.0f} pip)</span></div>
+        <div class="ops-row"><span class="ops-key">Target 2</span><span class="ops-val" style="color:#00d4a0;">{t2_sell:.{dec}f} &nbsp;(-{round((prezzo-t2_sell)/pip):.0f} pip)</span></div>
         <div class="ops-row"><span class="ops-key">Rischio max</span><span class="ops-val">2% del capitale</span></div>
     </div>
     """, unsafe_allow_html=True)
@@ -574,7 +662,6 @@ elif segnale in ("ATTENDI BUY", "ATTENDI SELL"):
 
 # ── Timer + bottoni ───────────────────────────────────────────────────────────
 timer_attivo = st.session_state["timer_attivo"]
-
 if timer_attivo and st.session_state["ultimo_aggiornamento"]:
     prossimo_dt  = st.session_state["ultimo_aggiornamento"] + timedelta(minutes=INTERVALLO_MINUTI)
     prossimo_ora = prossimo_dt.strftime("%H:%M")
@@ -633,17 +720,28 @@ with c3:
 
 # ── Bottone Test Telegram ─────────────────────────────────────────────────────
 if st.button("📱 TEST TELEGRAM", use_container_width=True, key="btn_telegram"):
-    ora     = ora_italiana().strftime("%H:%M")
+    ora = ora_italiana().strftime("%H:%M")
     messaggio_test = (
-        f"✅ <b>Test EUR/USD Bot — funziona!</b>\n\n"
-        f"⏰ Ore: {ora}\n"
-        f"💱 Prezzo: {prezzo:.5f}\n"
-        f"🔔 Segnale attuale: <b>{segnale}</b>\n\n"
-        f"4H: {p4h}% | 1H: {p1h}%\n\n"
-        f"🤖 Il bot è attivo e funzionante!"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"✅ <b>TEST BOT — {cfg['nome']}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"💱 <b>{cfg['nome']}</b>\n"
+        f"⏰ {ora}\n"
+        f"🌍 Sessione: <b>{sessione['stato']} — {sessione['nome']}</b>\n"
+        f"💰 Prezzo: <b>{prezzo:.{dec}f}</b>\n"
+        f"🔔 Segnale: <b>{segnale}</b>\n"
+        f"📊 4H: {p4h}% | 1H: {p1h}%\n"
+        f"🤖 Bot attivo e funzionante!"
     )
     invia_telegram(messaggio_test)
     st.success("✅ Messaggio inviato su Telegram!")
+
+# ── Bottone torna alla scelta ─────────────────────────────────────────────────
+if st.button("↩️ Cambia coppia", use_container_width=True, key="btn_back"):
+    st.session_state["coppia"] = None
+    st.session_state["dati"] = None
+    st.session_state["ultimo_aggiornamento"] = None
+    st.rerun()
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown(f"""
