@@ -312,8 +312,6 @@ def analizza(simbolo: str, periodo: str, intervallo: str) -> dict:
         ticker = yf.Ticker(simbolo)
         df = ticker.history(period=periodo, interval=intervallo)
         if df.empty:
-            df = ticker.history(period=periodo)
-        if df.empty:
             return {"errore": "Nessun dato"}
     except Exception as e:
         return {"errore": str(e)}
@@ -454,7 +452,7 @@ COPPIE = {
 
 def carica_dati(coppia: str):
     cfg = COPPIE[coppia]
-    r4h = analizza(cfg["simbolo"], "5d", "1h")
+    r4h = analizza(cfg["simbolo"], "5d", "4h")
     r1h = analizza(cfg["simbolo"], "1d", "1h")
     if "errore" not in r4h and "errore" not in r1h:
         st.session_state["dati"] = (r4h, r1h)
