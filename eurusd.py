@@ -9,22 +9,26 @@ import yfinance as yf
 import numpy as np
 import warnings
 import time
+import os
 import requests
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 warnings.filterwarnings("ignore")
 
-# Fuso orario italiano (UTC+2 ora legale)
-TZ_ITALIA = timezone(timedelta(hours=2))
+# Fuso orario italiano — si adatta da solo a ora legale/solare
+TZ_ITALIA = ZoneInfo("Europe/Rome")
 
 def ora_italiana():
     return datetime.now(tz=TZ_ITALIA)
 
 # ── Configurazione Telegram ───────────────────────────────────────────────────
-TELEGRAM_TOKEN   = "8778873144:AAF8G_Yu-pXZ-VxLbo4E1mGj-eMbABFXU9o"
-TELEGRAM_CHAT_ID = "1614697498"
+TELEGRAM_TOKEN   = os.environ.get("TELEGRAM_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 def invia_telegram(messaggio: str):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        return
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": messaggio, "parse_mode": "HTML"}, timeout=10)
@@ -747,3 +751,4 @@ st.markdown(f"""
     Aggiornato alle {ora_agg} &nbsp;·&nbsp; Auto-refresh ogni {INTERVALLO_MINUTI} min &nbsp;·&nbsp; Dati: Yahoo Finance
 </div>
 """, unsafe_allow_html=True)
+ 
