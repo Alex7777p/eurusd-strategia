@@ -1,0 +1,30 @@
+name: Forex Alert
+
+# Quando parte il controllo
+on:
+  schedule:
+    # Ogni 30 minuti. L'orario del cron e' in UTC: lo script dentro
+    # filtra poi la fascia oraria italiana (gestendo da solo ora legale/solare).
+    - cron: "0,30 * * * *"
+  workflow_dispatch:   # permette anche l'avvio manuale dal sito di GitHub
+
+jobs:
+  controllo:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Scarica il codice
+        uses: actions/checkout@v4
+
+      - name: Prepara Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Installa le librerie
+        run: pip install --quiet yfinance numpy requests
+
+      - name: Esegui il controllo forex
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python check_forex.py
