@@ -3,9 +3,9 @@ name: Forex Alert
 # Quando parte il controllo
 on:
   schedule:
-    # Ogni 30 minuti. L'orario del cron e' in UTC: lo script dentro
-    # filtra poi la fascia oraria italiana (gestendo da solo ora legale/solare).
-    - cron: "0,30 * * * *"
+    # Una volta all'ora, al minuto 5 (orario UTC): cosi' la candela 1H si e'
+    # appena chiusa. Lo script dentro filtra la fascia oraria italiana.
+    - cron: "5 * * * *"
   workflow_dispatch:   # permette anche l'avvio manuale dal sito di GitHub
 
 jobs:
@@ -19,6 +19,17 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      # Ricorda lo stato del controllo precedente tra un'esecuzione e l'altra.
+      # La chiave e' sempre diversa (run_id), cosi' ogni volta salva lo stato
+      # aggiornato; "restore-keys" recupera l'ultimo stato salvato.
+      - name: Ripristina memoria stato
+        uses: actions/cache@v4
+        with:
+          path: stato_forex.json
+          key: forex-stato-${{ github.run_id }}
+          restore-keys: |
+            forex-stato-
 
       - name: Installa le librerie
         run: pip install --quiet yfinance numpy requests
