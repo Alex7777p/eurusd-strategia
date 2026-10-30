@@ -2,16 +2,21 @@
 """
 Controllo automatico Forex — EUR/USD e EUR/JPY
 ================================================
-Gira da solo su GitHub Actions ogni 30 minuti.
-A ogni esecuzione invia UN report su Telegram con il segnale corrente
-di entrambe le coppie (BUY / SELL / ATTENDI / NEUTRO).
+Gira da solo su GitHub Actions una volta all'ora (subito dopo la chiusura
+della candela 1H).
+
+Invia su Telegram SOLO quando serve:
+  • quando CAMBIA il segnale di una coppia (es. ATTENDI BUY -> BUY)
+  • ogni giorno alle 9:00 (ora italiana): un "buongiorno" con il riepilogo completo
 
 La logica di analisi e' IDENTICA a quella dell'app eurusd.py.
-Le credenziali Telegram arrivano dalle "Secrets" di GitHub (variabili d'ambiente),
-non sono scritte nel codice.
+Lo stato del controllo precedente viene ricordato in un piccolo file
+(stato_forex.json) conservato nella cache di GitHub Actions tra un'esecuzione
+e l'altra. Le credenziali Telegram arrivano dalle "Secrets" di GitHub.
 """
 
 import os
+import json
 import warnings
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -25,11 +30,13 @@ warnings.filterwarnings("ignore")
 # ── Impostazioni ───────────────────────────────────────────────────────────────
 TZ_ITALIA = ZoneInfo("Europe/Rome")      # si adatta da solo a ora legale/solare
 
-# Finestra oraria (ora italiana) in cui inviare i messaggi.
-# Fuori da questa fascia il controllo NON invia nulla (per non disturbare di notte).
-# Per avvisi 24 ore su 24 metti ORA_INIZIO = 0 e ORA_FINE = 24.
-ORA_INIZIO = 7     # 07:00
-ORA_FINE   = 23    # 23:00
+# Finestra oraria (ora italiana) in cui il bot e' attivo.
+# Fuori da questa fascia non invia e non aggiorna nulla (riposo notturno).
+ORA_INIZIO    = 7      # 07:00
+ORA_FINE      = 23     # 23:00
+ORA_BUONGIORNO = 9     # ora del riepilogo giornaliero "buongiorno"
+
+STATO_FILE = "stato_forex.json"   # memoria dello stato precedente
 
 TELEGRAM_TOKEN   = os.environ.get("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
@@ -42,6 +49,24 @@ COPPIE = {
 
 def ora_italiana():
     return datetime.now(tz=TZ_ITALIA)
+
+
+# ── Memoria dello stato (file conservato nella cache) ────────────────────────────
+def carica_stato() -> dict:
+    try:
+        with open(STATO_FILE, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def salva_stato(stato: dict):
+    try:
+        with open(STATO_FILE, "w") as f:
+            json.dump(stato, f)
+        print(f"Stato salvato: {stato}")
+    except Exception as e:
+        print(f"Errore salvataggio stato: {e}")
 
 
 # ── Telegram ─────────────────────────────────────────────────────────────────────
@@ -163,12 +188,12 @@ def calcola_segnale(p4h: float, p1h: float) -> tuple:
     else:                         return "NEUTRO",       "⏸️"
 
 
-# ── Costruzione del blocco messaggio per una coppia ──────────────────────────────
-def blocco_coppia(key: str, cfg: dict) -> str:
+# ── Analizza una coppia: restituisce (segnale, testo_del_blocco) ─────────────────
+def analizza_coppia(key: str, cfg: dict) -> tuple:
     r4h = analizza(cfg["simbolo"], "5d", "4h")
     r1h = analizza(cfg["simbolo"], "1d", "1h")
     if "errore" in r4h or "errore" in r1h:
-        return f"⚠️ <b>{cfg['nome']}</b> — dati non disponibili"
+        return None, f"⚠️ <b>{cfg['nome']}</b> — dati non disponibili"
 
     p4h    = r4h["punteggio"]
     p1h    = r1h["punteggio"]
@@ -179,13 +204,12 @@ def blocco_coppia(key: str, cfg: dict) -> str:
     segnale, emoji = calcola_segnale(p4h, p1h)
     sess = get_sessione(key)
 
-    riga = (
+    testo = (
         f"{emoji} <b>{cfg['nome']}</b> → <b>{segnale}</b>\n"
         f"   💰 {prezzo:.{dec}f}  |  4H {p4h}% · 1H {p1h}%\n"
         f"   🌍 {sess['stato']} — {sess['nome']}"
     )
 
-    # Livelli operativi solo quando c'e' un segnale vero
     if segnale in ("BUY", "SELL"):
         ma20 = r1h["ma20"]
         if segnale == "BUY":
@@ -202,36 +226,81 @@ def blocco_coppia(key: str, cfg: dict) -> str:
                 sl = round(prezzo + pip * 30, dec)
             t1 = round(prezzo - pip * 20, dec)
             t2 = round(prezzo - pip * 40, dec)
-        riga += (
+        testo += (
             f"\n   🔔 <b>SEGNALE OPERATIVO</b>"
             f"\n   Ingresso {prezzo:.{dec}f} · SL {sl:.{dec}f}"
             f"\n   Target1 {t1:.{dec}f} · Target2 {t2:.{dec}f}"
             f"\n   ⚠️ Rischio max 2% del capitale"
         )
-    return riga
+    return segnale, testo
+
+
+def righe_cambi(cambi: list) -> str:
+    """cambi = lista di (nome, vecchio_segnale_o_None, nuovo_segnale)."""
+    righe = []
+    for nome, vecchio, nuovo in cambi:
+        if vecchio is None:
+            righe.append(f"• {nome}: stato iniziale <b>{nuovo}</b>")
+        else:
+            righe.append(f"• {nome}: {vecchio} → <b>{nuovo}</b>")
+    return "\n".join(righe)
 
 
 def main():
     now = ora_italiana()
 
-    # Rispetta la finestra oraria
+    # Riposo notturno: non invia e non modifica lo stato
     if not (ORA_INIZIO <= now.hour < ORA_FINE):
         print(f"Ora {now.strftime('%H:%M')} fuori dalla finestra {ORA_INIZIO}:00-{ORA_FINE}:00. Nessun invio.")
         return
 
-    blocchi = [blocco_coppia(k, c) for k, c in COPPIE.items()]
+    stato_prec  = carica_stato()
+    stato_nuovo = dict(stato_prec)
+    blocchi = {}
+    cambi   = []
 
-    testo = (
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"📊 <b>REPORT FOREX</b> · {now.strftime('%H:%M')}\n"
-        f"━━━━━━━━━━━━━━━━━━\n\n"
-        + "\n\n".join(blocchi)
-        + f"\n\n━━━━━━━━━━━━━━━━━━\n"
-        f"🤖 Controllo automatico · dati Yahoo Finance"
-    )
+    for key, cfg in COPPIE.items():
+        seg, testo = analizza_coppia(key, cfg)
+        blocchi[key] = testo
+        if seg is None:
+            # dati non disponibili: non tocco lo stato di questa coppia
+            continue
+        prec = stato_prec.get(key)
+        if prec != seg:
+            cambi.append((cfg["nome"], prec, seg))
+        stato_nuovo[key] = seg
 
-    print(testo)
-    invia_telegram(testo)
+    is_buongiorno = (now.hour == ORA_BUONGIORNO)
+    deve_inviare  = bool(cambi) or is_buongiorno
+
+    if deve_inviare:
+        corpo = "\n\n".join(blocchi[k] for k in COPPIE)
+
+        # Intestazione a seconda del motivo
+        solo_iniziali = cambi and all(v is None for _, v, _ in cambi)
+        if is_buongiorno:
+            intest = f"☀️ <b>BUONGIORNO — Riepilogo Forex</b> · {now.strftime('%H:%M')}"
+            if cambi and not solo_iniziali:
+                intest += "\n" + righe_cambi([c for c in cambi if c[1] is not None])
+        elif solo_iniziali:
+            intest = f"📊 <b>PRIMO AVVIO — stato attuale</b> · {now.strftime('%H:%M')}"
+        else:
+            intest = f"🔔 <b>CAMBIO SEGNALE</b> · {now.strftime('%H:%M')}\n" + righe_cambi(cambi)
+
+        testo = (
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"{intest}\n"
+            f"━━━━━━━━━━━━━━━━━━\n\n"
+            + corpo
+            + f"\n\n━━━━━━━━━━━━━━━━━━\n"
+            f"🤖 Controllo automatico · dati Yahoo Finance"
+        )
+        print(testo)
+        invia_telegram(testo)
+    else:
+        print(f"Nessun cambio e non e' l'ora del buongiorno ({now.strftime('%H:%M')}). Nessun invio.")
+
+    salva_stato(stato_nuovo)
 
 
 if __name__ == "__main__":
