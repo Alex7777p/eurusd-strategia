@@ -3,10 +3,11 @@ name: Forex Alert
 # Quando parte il controllo
 on:
   schedule:
-    # Una volta all'ora, al minuto 5 (orario UTC): cosi' la candela 1H si e'
-    # appena chiusa. Lo script dentro filtra la fascia oraria italiana.
-    - cron: "5 * * * *"
-  workflow_dispatch:   # permette anche l'avvio manuale dal sito di GitHub
+    # Ogni 30 minuti, ai minuti 5 e 35 (orario UTC): cosi' il controllo cade
+    # poco dopo la chiusura/meta' della candela. Lo script dentro filtra la
+    # fascia oraria italiana, il weekend e decide quando inviare.
+    - cron: "5,35 * * * *"
+  workflow_dispatch:   # avvio manuale dal sito di GitHub (invia sempre un TEST)
 
 jobs:
   controllo:
@@ -21,8 +22,6 @@ jobs:
           python-version: "3.11"
 
       # Ricorda lo stato del controllo precedente tra un'esecuzione e l'altra.
-      # La chiave e' sempre diversa (run_id), cosi' ogni volta salva lo stato
-      # aggiornato; "restore-keys" recupera l'ultimo stato salvato.
       - name: Ripristina memoria stato
         uses: actions/cache@v4
         with:
