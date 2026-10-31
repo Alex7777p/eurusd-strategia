@@ -2,17 +2,22 @@
 """
 Controllo automatico Forex — EUR/USD e EUR/JPY
 ================================================
-Gira da solo su GitHub Actions una volta all'ora (subito dopo la chiusura
-della candela 1H).
+Gira da solo su GitHub Actions ogni 30 minuti (ai minuti 5 e 35).
+Attivo SOLO da lunedi' a venerdi' (il weekend i mercati sono chiusi).
 
-Invia su Telegram SOLO quando serve:
-  • quando CAMBIA il segnale di una coppia (es. ATTENDI BUY -> BUY)
-  • ogni giorno alle 9:00 (ora italiana): un "buongiorno" con il riepilogo completo
+Invia su Telegram:
+  • ☀️  BUONGIORNO alle 9:00  → riepilogo completo di entrambe le coppie
+  • 🎯  OPERATIVO alle 15:00   → il "da farsi" nel cuore della sovrapposizione
+                                 Londra-New York (il momento di massimo volume)
+  • 🔔  CAMBIO SEGNALE         → se tra le 14:00 e le 18:00 (finestra operativa)
+                                 EUR/USD o EUR/JPY cambia segnale
 
-La logica di analisi e' IDENTICA a quella dell'app eurusd.py.
-Lo stato del controllo precedente viene ricordato in un piccolo file
-(stato_forex.json) conservato nella cache di GitHub Actions tra un'esecuzione
-e l'altra. Le credenziali Telegram arrivano dalle "Secrets" di GitHub.
+Quando viene avviato A MANO da GitHub ("Run workflow") invia sempre un
+report di TEST, cosi' si puo' provare in qualsiasi momento, weekend compreso.
+
+Logica di analisi IDENTICA all'app eurusd.py. Lo stato precedente e'
+ricordato in stato_forex.json (cache di GitHub Actions). Credenziali Telegram
+dalle "Secrets" di GitHub.
 """
 
 import os
@@ -27,16 +32,20 @@ import yfinance as yf
 
 warnings.filterwarnings("ignore")
 
-# ── Impostazioni ───────────────────────────────────────────────────────────────
+# ── Impostazioni orarie (ora italiana) ───────────────────────────────────────────
 TZ_ITALIA = ZoneInfo("Europe/Rome")      # si adatta da solo a ora legale/solare
 
-# Finestra oraria (ora italiana) in cui il bot e' attivo.
-# Fuori da questa fascia non invia e non aggiorna nulla (riposo notturno).
-ORA_INIZIO    = 7      # 07:00
-ORA_FINE      = 23     # 23:00
-ORA_BUONGIORNO = 9     # ora del riepilogo giornaliero "buongiorno"
+ORA_BUONGIORNO     = 9     # riepilogo del mattino
+ORA_OPERATIVO      = 15    # messaggio "da farsi" (overlap Londra-NY, 14:00-17:30)
+ORA_CAMBIO_INIZIO  = 14    # inizio finestra avvisi di cambiamento
+ORA_CAMBIO_FINE    = 18    # fine   finestra avvisi di cambiamento (inclusa)
 
-STATO_FILE = "stato_forex.json"   # memoria dello stato precedente
+# Il bot "lavora" (aggiorna lo stato e puo' inviare) solo in questa fascia,
+# nei giorni feriali. Fuori riposa.
+ORA_ATTIVO_INIZIO  = 8
+ORA_ATTIVO_FINE    = 23
+
+STATO_FILE = "stato_forex.json"
 
 TELEGRAM_TOKEN   = os.environ.get("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
@@ -188,8 +197,8 @@ def calcola_segnale(p4h: float, p1h: float) -> tuple:
     else:                         return "NEUTRO",       "⏸️"
 
 
-# ── Analizza una coppia: restituisce (segnale, testo_del_blocco) ─────────────────
 def analizza_coppia(key: str, cfg: dict) -> tuple:
+    """Restituisce (segnale, testo_del_blocco)."""
     r4h = analizza(cfg["simbolo"], "5d", "4h")
     r1h = analizza(cfg["simbolo"], "1d", "1h")
     if "errore" in r4h or "errore" in r1h:
@@ -240,20 +249,40 @@ def righe_cambi(cambi: list) -> str:
     righe = []
     for nome, vecchio, nuovo in cambi:
         if vecchio is None:
-            righe.append(f"• {nome}: stato iniziale <b>{nuovo}</b>")
+            righe.append(f"• {nome}: <b>{nuovo}</b>")
         else:
             righe.append(f"• {nome}: {vecchio} → <b>{nuovo}</b>")
     return "\n".join(righe)
 
 
+def componi(intestazione: str, blocchi: dict, now) -> str:
+    corpo = "\n\n".join(blocchi[k] for k in COPPIE)
+    return (
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"{intestazione}\n"
+        f"━━━━━━━━━━━━━━━━━━\n\n"
+        + corpo
+        + f"\n\n━━━━━━━━━━━━━━━━━━\n"
+        f"🤖 Controllo automatico · dati Yahoo Finance"
+    )
+
+
 def main():
     now = ora_italiana()
+    hhmm = now.strftime("%H:%M")
+    evento = os.environ.get("GITHUB_EVENT_NAME", "")
+    is_test = (evento == "workflow_dispatch")   # avvio manuale da GitHub
 
-    # Riposo notturno: non invia e non modifica lo stato
-    if not (ORA_INIZIO <= now.hour < ORA_FINE):
-        print(f"Ora {now.strftime('%H:%M')} fuori dalla finestra {ORA_INIZIO}:00-{ORA_FINE}:00. Nessun invio.")
-        return
+    # Fuori dal test: niente weekend, niente orari morti
+    if not is_test:
+        if now.weekday() >= 5:   # 5 = sabato, 6 = domenica
+            print(f"Weekend ({now.strftime('%A')}): mercati chiusi. Nessun invio.")
+            return
+        if not (ORA_ATTIVO_INIZIO <= now.hour <= ORA_ATTIVO_FINE):
+            print(f"Ora {hhmm} fuori dalla fascia attiva. Nessun invio.")
+            return
 
+    # Calcolo i segnali e rilevo i cambiamenti
     stato_prec  = carica_stato()
     stato_nuovo = dict(stato_prec)
     blocchi = {}
@@ -263,44 +292,39 @@ def main():
         seg, testo = analizza_coppia(key, cfg)
         blocchi[key] = testo
         if seg is None:
-            # dati non disponibili: non tocco lo stato di questa coppia
             continue
-        prec = stato_prec.get(key)
-        if prec != seg:
-            cambi.append((cfg["nome"], prec, seg))
+        if stato_prec.get(key) != seg:
+            cambi.append((cfg["nome"], stato_prec.get(key), seg))
         stato_nuovo[key] = seg
 
-    is_buongiorno = (now.hour == ORA_BUONGIORNO)
-    deve_inviare  = bool(cambi) or is_buongiorno
+    h = now.hour
+    oggi = now.strftime("%Y-%m-%d")
+    intest = None
 
-    if deve_inviare:
-        corpo = "\n\n".join(blocchi[k] for k in COPPIE)
+    # I messaggi fissi (buongiorno, operativo) partono UNA sola volta al giorno:
+    # con la cadenza di 30 min la stessa ora scatta due volte (es. 9:05 e 9:35),
+    # quindi li marco per data cosi' il secondo passaggio non li ripete.
+    if is_test:
+        intest = f"🧪 <b>TEST — stato attuale</b> · {hhmm}"
+    elif h == ORA_BUONGIORNO and stato_prec.get("data_buongiorno") != oggi:
+        intest = f"☀️ <b>BUONGIORNO — Riepilogo</b> · {hhmm}"
+        stato_nuovo["data_buongiorno"] = oggi
+    elif h == ORA_OPERATIVO and stato_prec.get("data_operativo") != oggi:
+        intest = f"🎯 <b>FINESTRA OPERATIVA (Londra–NY) — Il da farsi</b> · {hhmm}"
+        stato_nuovo["data_operativo"] = oggi
+    elif (ORA_CAMBIO_INIZIO <= h <= ORA_CAMBIO_FINE) and cambi:
+        intest = f"🔔 <b>CAMBIO SEGNALE</b> · {hhmm}\n" + righe_cambi(cambi)
 
-        # Intestazione a seconda del motivo
-        solo_iniziali = cambi and all(v is None for _, v, _ in cambi)
-        if is_buongiorno:
-            intest = f"☀️ <b>BUONGIORNO — Riepilogo Forex</b> · {now.strftime('%H:%M')}"
-            if cambi and not solo_iniziali:
-                intest += "\n" + righe_cambi([c for c in cambi if c[1] is not None])
-        elif solo_iniziali:
-            intest = f"📊 <b>PRIMO AVVIO — stato attuale</b> · {now.strftime('%H:%M')}"
-        else:
-            intest = f"🔔 <b>CAMBIO SEGNALE</b> · {now.strftime('%H:%M')}\n" + righe_cambi(cambi)
-
-        testo = (
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"{intest}\n"
-            f"━━━━━━━━━━━━━━━━━━\n\n"
-            + corpo
-            + f"\n\n━━━━━━━━━━━━━━━━━━\n"
-            f"🤖 Controllo automatico · dati Yahoo Finance"
-        )
+    if intest is not None:
+        testo = componi(intest, blocchi, now)
         print(testo)
         invia_telegram(testo)
     else:
-        print(f"Nessun cambio e non e' l'ora del buongiorno ({now.strftime('%H:%M')}). Nessun invio.")
+        print(f"Ora {hhmm}: nessun messaggio previsto (cambi: {cambi}).")
 
-    salva_stato(stato_nuovo)
+    # Aggiorno sempre la memoria (tranne nei test, per non sporcare la linea reale)
+    if not is_test:
+        salva_stato(stato_nuovo)
 
 
 if __name__ == "__main__":
